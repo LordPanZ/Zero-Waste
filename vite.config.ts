@@ -2,21 +2,25 @@ import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
+// GitHub Pages serves project sites from /<repo>/, everywhere else (Netlify, local) is root-served.
+const base = process.env.GITHUB_PAGES === 'true' ? '/Zero-Waste/' : '/'
+
 // https://vite.dev/config/
 export default defineConfig({
+  base,
   plugins: [
     react(),
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['icons/apple-touch-icon.png'],
       manifest: {
-        id: '/',
+        id: base,
         name: 'Zero Waste — Despensa sin desperdicio',
         short_name: 'Zero Waste',
         description:
           'Controla tu despensa, evita que la comida caduque y descubre recetas con lo que tienes antes de que se estropee.',
-        start_url: '/',
-        scope: '/',
+        start_url: base,
+        scope: base,
         display: 'standalone',
         background_color: '#f0fdf4',
         theme_color: '#16a34a',
@@ -24,9 +28,9 @@ export default defineConfig({
         lang: 'es',
         categories: ['food', 'lifestyle', 'productivity'],
         icons: [
-          { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
-          { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
-          { src: '/icons/icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+          { src: `${base}icons/icon-192.png`, sizes: '192x192', type: 'image/png', purpose: 'any' },
+          { src: `${base}icons/icon-512.png`, sizes: '512x512', type: 'image/png', purpose: 'any' },
+          { src: `${base}icons/icon-maskable-512.png`, sizes: '512x512', type: 'image/png', purpose: 'maskable' },
         ],
       },
       workbox: {
