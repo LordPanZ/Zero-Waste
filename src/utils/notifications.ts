@@ -45,7 +45,7 @@ export function maybeNotifyExpiringItems(items: PantryItem[], reminderDaysAhead:
   try {
     new Notification(title, {
       body,
-      icon: '/icons/icon-192.png',
+      icon: `${import.meta.env.BASE_URL}icons/icon-192.png`,
       tag: 'zero-waste-expiring',
     })
     localStorage.setItem(LAST_CHECK_KEY, today)
