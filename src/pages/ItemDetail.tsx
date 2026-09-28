@@ -1,5 +1,5 @@
 import { useLiveQuery } from 'dexie-react-hooks'
-import { ArrowLeft, CheckCircle2, Pencil, ScanLine, Trash2, XCircle } from 'lucide-react'
+import { ArrowLeft, CheckCircle2, ClipboardList, Pencil, ScanLine, Trash2, XCircle } from 'lucide-react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { StatusBadge } from '../components/StatusBadge'
 import { db, getNutritionByName } from '../db'
@@ -100,7 +100,7 @@ export function ItemDetail() {
         <div className="mx-4 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-800">{item.notes}</div>
       )}
 
-      {nutrition && (
+      {nutrition ? (
         <div className="mx-4 rounded-2xl border border-stone-100 p-3">
           <p className="mb-2 text-sm font-semibold text-stone-800">Información nutricional (por 100 g)</p>
           <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
@@ -114,6 +114,16 @@ export function ItemDetail() {
             ))}
           </div>
         </div>
+      ) : (
+        <Link
+          to={`/despensa/${itemId}/editar?nutricion=1`}
+          className="mx-4 flex items-center justify-between gap-2 rounded-2xl border border-dashed border-brand-300 bg-brand-50/40 px-3 py-3 text-sm text-brand-700"
+        >
+          <span className="flex items-center gap-2">
+            <ClipboardList size={16} /> Añadir información nutricional
+          </span>
+          <span>→</span>
+        </Link>
       )}
 
       <div className="mx-4 flex flex-col gap-2 pt-2">

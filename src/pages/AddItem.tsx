@@ -1,6 +1,6 @@
-import { Camera, Check, ChevronDown, Loader2, X } from 'lucide-react'
+import { Camera, Check, ChevronDown, ClipboardList, Loader2, X } from 'lucide-react'
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { PageHeader } from '../components/Layout'
 import { db, getNutritionByName, getSettings, upsertNutrition } from '../db'
 import { CATEGORY_LABELS, findCatalogEntry, searchCatalog, STORAGE_LABELS } from '../data/foodCatalog'
@@ -16,6 +16,7 @@ const STORAGES = Object.keys(STORAGE_LABELS) as StorageLocation[]
 export function AddItem() {
   const navigate = useNavigate()
   const { id } = useParams()
+  const [searchParams] = useSearchParams()
   const editingId = id ? Number(id) : undefined
 
   const [name, setName] = useState('')
@@ -31,15 +32,15 @@ export function AddItem() {
   const [fromOcr, setFromOcr] = useState(false)
 
   const [showSuggestions, setShowSuggestions] = useState(false)
-  const [ocrStatus, setOcrStatus] = useState<'idle' | 'scanning' | 'error'>('idle')
+  const [ocrStatus, setOcrStatus] = useState<'idle' | 'scanning' | 'error' | 'no-match'>('idle')
   const [ocrCandidates, setOcrCandidates] = useState<DateCandidate[]>([])
   const [photoPreview, setPhotoPreview] = useState<string | undefined>()
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const [nutritionExpanded, setNutritionExpanded] = useState(false)
+  const [nutritionExpanded, setNutritionExpanded] = useState(searchParams.get('nutricion') === '1')
   const [nutrition, setNutrition] = useState<ScannedNutrition>({})
   const [nutritionFromOcr, setNutritionFromOcr] = useState(false)
-  const [nutritionOcrStatus, setNutritionOcrStatus] = useState<'idle' | 'scanning' | 'error'>('idle')
+  const [nutritionOcrStatus, setNutritionOcrStatus] = useState<'idle' | 'scanning' | 'error' | 'no-match'>('idle')
   const [nutritionPhoto, setNutritionPhoto] = useState<string | undefined>()
   const nutritionFileInputRef = useRef<HTMLInputElement>(null)
 
@@ -118,11 +119,13 @@ export function AddItem() {
     try {
       const result = await scanExpirationDate(file)
       setOcrCandidates(result.candidates)
-      setOcrStatus('idle')
       if (result.candidates.length > 0) {
+        setOcrStatus('idle')
         setExpirationDate(result.candidates[0].iso)
         setTrackingMode('fecha')
         setFromOcr(true)
+      } else {
+        setOcrStatus('no-match')
       }
     } catch {
       setOcrStatus('error')
@@ -134,9 +137,14 @@ export function AddItem() {
     setNutritionOcrStatus('scanning')
     try {
       const result = await scanNutritionLabel(file)
-      setNutrition((prev) => ({ ...prev, ...result.values }))
-      setNutritionFromOcr(true)
-      setNutritionOcrStatus('idle')
+      const found = Object.values(result.values).some((v) => v !== undefined)
+      if (found) {
+        setNutrition((prev) => ({ ...prev, ...result.values }))
+        setNutritionFromOcr(true)
+        setNutritionOcrStatus('idle')
+      } else {
+        setNutritionOcrStatus('no-match')
+      }
     } catch {
       setNutritionOcrStatus('error')
     }
@@ -341,6 +349,13 @@ export function AddItem() {
               <p className="text-xs text-red-600">No se pudo leer la imagen. Prueba con otra foto o introduce la fecha a mano.</p>
             )}
 
+            {ocrStatus === 'no-match' && (
+              <p className="text-xs text-amber-700">
+                No hemos podido detectar ninguna fecha en la foto. Prueba con otra foto bien enfocada e iluminada, o
+                escribe la fecha directamente arriba.
+              </p>
+            )}
+
             {ocrCandidates.length > 0 && (
               <div className="flex flex-col gap-1.5">
                 <p className="text-xs font-medium text-stone-500">Fechas detectadas — toca para usar:</p>
@@ -394,12 +409,13 @@ export function AddItem() {
           />
         </Field>
 
-        <div className="rounded-2xl border border-stone-100">
+        <div className="rounded-2xl border border-brand-200 bg-brand-50/40">
           <button
             onClick={() => setNutritionExpanded((v) => !v)}
             className="flex w-full items-center justify-between px-3 py-3 text-left"
           >
-            <span className="text-sm font-medium text-stone-700">
+            <span className="flex items-center gap-2 text-sm font-medium text-stone-700">
+              <ClipboardList size={16} className="text-brand-600" />
               Información nutricional (opcional){hasNutritionData && ' ✓'}
             </span>
             <ChevronDown size={16} className={`text-stone-400 transition ${nutritionExpanded ? 'rotate-180' : ''}`} />
@@ -442,6 +458,13 @@ export function AddItem() {
 
               {nutritionOcrStatus === 'error' && (
                 <p className="text-xs text-red-600">No se pudo leer la imagen. Prueba con otra foto o introduce los valores a mano.</p>
+              )}
+
+              {nutritionOcrStatus === 'no-match' && (
+                <p className="text-xs text-amber-700">
+                  No hemos podido leer ningún valor en la foto. Prueba con otra foto bien enfocada de la tabla
+                  nutricional, o escribe los valores directamente abajo.
+                </p>
               )}
 
               <p className="text-xs text-stone-500">Valores por 100 g / 100 ml. Revisa y corrige si algo no se ha leído bien.</p>
