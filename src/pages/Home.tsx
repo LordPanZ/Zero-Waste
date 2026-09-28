@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { EmptyState } from '../components/EmptyState'
 import { ItemCard } from '../components/ItemCard'
 import { PageHeader } from '../components/Layout'
+import { ProfilesShowcase } from '../components/ProfilesShowcase'
 import { useSortedPantryItems, useWasteLog } from '../hooks/usePantry'
 import { getItemStatus } from '../utils/dateUtils'
 import { computeWasteStats } from '../utils/stats'
@@ -23,6 +24,8 @@ export function Home() {
   return (
     <div className="flex flex-col gap-5 pb-6">
       <PageHeader title={`${greeting} 👋`} subtitle="Esto es lo que necesita tu atención hoy" />
+
+      <ProfilesShowcase />
 
       <div className="grid grid-cols-3 gap-2 px-4">
         <SummaryStat label="Caducados" value={expired.length} tone="bg-red-50 text-red-700" />
