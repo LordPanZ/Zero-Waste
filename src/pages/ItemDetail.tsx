@@ -2,7 +2,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { ArrowLeft, CheckCircle2, Pencil, ScanLine, Trash2, XCircle } from 'lucide-react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { StatusBadge } from '../components/StatusBadge'
-import { db } from '../db'
+import { db, getNutritionByName } from '../db'
 import { CATEGORY_ICONS, CATEGORY_LABELS, STORAGE_LABELS } from '../data/foodCatalog'
 import {
   daysUntil,
@@ -11,12 +11,14 @@ import {
   getEffectiveExpirationISO,
   getItemStatus,
 } from '../utils/dateUtils'
+import { formatNutritionValue, NUTRITION_FIELDS } from '../utils/nutrition'
 
 export function ItemDetail() {
   const { id } = useParams()
   const itemId = Number(id)
   const navigate = useNavigate()
   const item = useLiveQuery(() => db.pantryItems.get(itemId), [itemId])
+  const nutrition = useLiveQuery(() => (item ? getNutritionByName(item.name) : undefined), [item?.name])
 
   if (item === undefined) return null
   if (item === null || !item) {
@@ -96,6 +98,22 @@ export function ItemDetail() {
 
       {item.notes && (
         <div className="mx-4 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-800">{item.notes}</div>
+      )}
+
+      {nutrition && (
+        <div className="mx-4 rounded-2xl border border-stone-100 p-3">
+          <p className="mb-2 text-sm font-semibold text-stone-800">Información nutricional (por 100 g)</p>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
+            {NUTRITION_FIELDS.filter((f) => nutrition[f.key] !== undefined).map((f) => (
+              <div key={f.key} className="flex items-center justify-between gap-2">
+                <span className="text-stone-500">{f.label}</span>
+                <span className="font-medium text-stone-800">
+                  {formatNutritionValue(nutrition[f.key]!)} {f.unit}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
 
       <div className="mx-4 flex flex-col gap-2 pt-2">

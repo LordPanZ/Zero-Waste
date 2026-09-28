@@ -91,11 +91,17 @@ export interface ScanResult {
   candidates: DateCandidate[]
 }
 
-/** Runs OCR on an image (File, Blob or data URL) and extracts date candidates. */
-export async function scanExpirationDate(image: File | Blob | string): Promise<ScanResult> {
+/** Runs OCR on an image and returns the raw recognized text. Shared by every scan feature. */
+export async function recognizeText(image: File | Blob | string): Promise<string> {
   const worker = await getWorker()
   const { data } = await worker.recognize(image)
-  return { text: data.text, candidates: extractDateCandidates(data.text) }
+  return data.text
+}
+
+/** Runs OCR on an image (File, Blob or data URL) and extracts date candidates. */
+export async function scanExpirationDate(image: File | Blob | string): Promise<ScanResult> {
+  const text = await recognizeText(image)
+  return { text, candidates: extractDateCandidates(text) }
 }
 
 /** Frees the underlying Tesseract worker; call when leaving the scan screen. */

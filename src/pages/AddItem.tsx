@@ -1,12 +1,14 @@
-import { Camera, Check, Loader2, X } from 'lucide-react'
+import { Camera, Check, ChevronDown, Loader2, X } from 'lucide-react'
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { PageHeader } from '../components/Layout'
-import { db, getSettings } from '../db'
+import { db, getNutritionByName, getSettings, upsertNutrition } from '../db'
 import { CATEGORY_LABELS, findCatalogEntry, searchCatalog, STORAGE_LABELS } from '../data/foodCatalog'
 import type { FoodCategory, PantryItem, StorageLocation, TrackingMode } from '../types'
 import { formatDateHuman, todayISO } from '../utils/dateUtils'
+import { NUTRITION_FIELDS } from '../utils/nutrition'
 import { type DateCandidate, scanExpirationDate } from '../utils/ocr'
+import { type ScannedNutrition, scanNutritionLabel } from '../utils/nutritionOcr'
 
 const CATEGORIES = Object.keys(CATEGORY_LABELS) as FoodCategory[]
 const STORAGES = Object.keys(STORAGE_LABELS) as StorageLocation[]
@@ -34,6 +36,13 @@ export function AddItem() {
   const [photoPreview, setPhotoPreview] = useState<string | undefined>()
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  const [nutritionExpanded, setNutritionExpanded] = useState(false)
+  const [nutrition, setNutrition] = useState<ScannedNutrition>({})
+  const [nutritionFromOcr, setNutritionFromOcr] = useState(false)
+  const [nutritionOcrStatus, setNutritionOcrStatus] = useState<'idle' | 'scanning' | 'error'>('idle')
+  const [nutritionPhoto, setNutritionPhoto] = useState<string | undefined>()
+  const nutritionFileInputRef = useRef<HTMLInputElement>(null)
+
   useEffect(() => {
     getSettings().then((s) => setStorage(s.defaultStorage))
   }, [])
@@ -53,8 +62,30 @@ export function AddItem() {
       setAddedDate(item.addedDate)
       setNotes(item.notes ?? '')
       setFromOcr(!!item.fromOcr)
+      loadSavedNutrition(item.name)
     })
   }, [editingId])
+
+  async function loadSavedNutrition(forName: string) {
+    const saved = await getNutritionByName(forName)
+    if (!saved) return
+    setNutrition({
+      energyKcal: saved.energyKcal,
+      fat: saved.fat,
+      saturatedFat: saved.saturatedFat,
+      carbs: saved.carbs,
+      sugars: saved.sugars,
+      fiber: saved.fiber,
+      protein: saved.protein,
+      salt: saved.salt,
+    })
+    setNutritionExpanded(true)
+  }
+
+  function updateNutritionField(key: keyof ScannedNutrition, raw: string) {
+    setNutrition((prev) => ({ ...prev, [key]: raw === '' ? undefined : Number(raw) }))
+    setNutritionFromOcr(false)
+  }
 
   const suggestions = useMemo(() => (name.length > 0 ? searchCatalog(name) : []), [name])
 
@@ -62,6 +93,7 @@ export function AddItem() {
     const entry = findCatalogEntry(entryName)
     setName(entryName)
     setShowSuggestions(false)
+    void loadSavedNutrition(entryName)
     if (!entry) return
     setCategory(entry.category)
     setStorage(entry.defaultStorage)
@@ -97,6 +129,21 @@ export function AddItem() {
     }
   }
 
+  async function handlePhotoSelectedNutrition(file: File) {
+    setNutritionPhoto(URL.createObjectURL(file))
+    setNutritionOcrStatus('scanning')
+    try {
+      const result = await scanNutritionLabel(file)
+      setNutrition((prev) => ({ ...prev, ...result.values }))
+      setNutritionFromOcr(true)
+      setNutritionOcrStatus('idle')
+    } catch {
+      setNutritionOcrStatus('error')
+    }
+  }
+
+  const hasNutritionData = NUTRITION_FIELDS.some((f) => nutrition[f.key] !== undefined)
+
   async function handleSave() {
     if (!name.trim()) return
     const now = Date.now()
@@ -114,6 +161,10 @@ export function AddItem() {
       fromOcr: trackingMode === 'fecha' ? fromOcr : undefined,
       createdAt: now,
       updatedAt: now,
+    }
+
+    if (hasNutritionData) {
+      await upsertNutrition({ name: name.trim(), perGrams: 100, ...nutrition, fromOcr: nutritionFromOcr })
     }
 
     if (editingId) {
@@ -342,6 +393,80 @@ export function AddItem() {
             className="w-full resize-none rounded-xl border border-stone-200 px-3 py-2.5 text-sm outline-none focus:border-brand-500"
           />
         </Field>
+
+        <div className="rounded-2xl border border-stone-100">
+          <button
+            onClick={() => setNutritionExpanded((v) => !v)}
+            className="flex w-full items-center justify-between px-3 py-3 text-left"
+          >
+            <span className="text-sm font-medium text-stone-700">
+              Información nutricional (opcional){hasNutritionData && ' ✓'}
+            </span>
+            <ChevronDown size={16} className={`text-stone-400 transition ${nutritionExpanded ? 'rotate-180' : ''}`} />
+          </button>
+
+          {nutritionExpanded && (
+            <div className="flex flex-col gap-3 border-t border-stone-100 p-3">
+              <button
+                onClick={() => nutritionFileInputRef.current?.click()}
+                className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-brand-400 bg-white py-2.5 text-sm font-medium text-brand-700"
+              >
+                {nutritionOcrStatus === 'scanning' ? (
+                  <Loader2 size={16} className="animate-spin" />
+                ) : (
+                  <Camera size={16} />
+                )}
+                {nutritionOcrStatus === 'scanning' ? 'Leyendo la etiqueta…' : 'Escanear tabla nutricional'}
+              </button>
+              <input
+                ref={nutritionFileInputRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0]
+                  if (file) void handlePhotoSelectedNutrition(file)
+                  e.target.value = ''
+                }}
+              />
+
+              {nutritionPhoto && (
+                <div className="flex items-center gap-3">
+                  <img src={nutritionPhoto} alt="Foto de la etiqueta nutricional" className="h-16 w-16 rounded-lg object-cover" />
+                  <button onClick={() => setNutritionPhoto(undefined)} className="text-stone-400" aria-label="Quitar foto">
+                    <X size={16} />
+                  </button>
+                </div>
+              )}
+
+              {nutritionOcrStatus === 'error' && (
+                <p className="text-xs text-red-600">No se pudo leer la imagen. Prueba con otra foto o introduce los valores a mano.</p>
+              )}
+
+              <p className="text-xs text-stone-500">Valores por 100 g / 100 ml. Revisa y corrige si algo no se ha leído bien.</p>
+
+              <div className="grid grid-cols-2 gap-3">
+                {NUTRITION_FIELDS.map((f) => (
+                  <label key={f.key} className="block">
+                    <span className="mb-1 block text-xs font-medium text-stone-600">
+                      {f.label} <span className="text-stone-400">({f.unit})</span>
+                    </span>
+                    <input
+                      type="number"
+                      min={0}
+                      step="any"
+                      value={nutrition[f.key] ?? ''}
+                      onChange={(e) => updateNutritionField(f.key, e.target.value)}
+                      placeholder="0"
+                      className="w-full rounded-xl border border-stone-200 px-3 py-2 text-sm outline-none focus:border-brand-500"
+                    />
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="fixed inset-x-0 bottom-16 z-20 mx-auto max-w-[480px] border-t border-stone-100 bg-white/95 px-4 py-3 backdrop-blur">
