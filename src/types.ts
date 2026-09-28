@@ -14,8 +14,16 @@ export type FoodCategory =
   | 'bebida'
   | 'otro'
 
+export interface Profile {
+  id?: number
+  name: string
+  emoji: string
+  createdAt: number
+}
+
 export interface PantryItem {
   id?: number
+  profileId: number
   name: string
   category: FoodCategory
   storage: StorageLocation
@@ -39,6 +47,7 @@ export type WasteOutcome = 'consumido' | 'desperdiciado'
 
 export interface WasteLogEntry {
   id?: number
+  profileId: number
   itemName: string
   category: FoodCategory
   quantity: number
@@ -56,6 +65,7 @@ export interface AppSettings {
   reminderDaysAhead: number
   defaultStorage: StorageLocation
   onboarded: boolean
+  activeProfileId?: number
 }
 
 export type ItemStatus = 'caducado' | 'urgente' | 'proximo' | 'ok' | 'sin-fecha'

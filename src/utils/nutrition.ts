@@ -1,4 +1,5 @@
 import type { NutritionFacts } from '../types'
+import { foodNamesMatch } from './matching'
 
 export const NUTRITION_FIELDS = [
   { key: 'energyKcal', label: 'Energía', unit: 'kcal' },
@@ -16,19 +17,8 @@ type ScannedFields = Pick<
   'energyKcal' | 'fat' | 'saturatedFat' | 'carbs' | 'sugars' | 'fiber' | 'protein' | 'salt'
 >
 
-function normalize(name: string): string {
-  return name.trim().toLowerCase()
-}
-
-/** Loose match used everywhere pantry/recipe ingredient names are compared: substring either way. */
-export function namesMatch(a: string, b: string): boolean {
-  const na = normalize(a)
-  const nb = normalize(b)
-  return na.length > 0 && nb.length > 0 && (na.includes(nb) || nb.includes(na))
-}
-
 export function findNutritionMatch(ingredientName: string, catalog: NutritionFacts[]): NutritionFacts | undefined {
-  return catalog.find((entry) => namesMatch(entry.name, ingredientName))
+  return catalog.find((entry) => foodNamesMatch(entry.name, ingredientName))
 }
 
 export type NutritionTotals = Partial<Record<(typeof NUTRITION_FIELDS)[number]['key'], number>>

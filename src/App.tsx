@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { BrowserRouter, Route, Routes } from 'react-router-dom'
 import { Layout } from './components/Layout'
-import { getSettings } from './db'
+import { ensureActiveProfile, getSettings } from './db'
 import { usePantryItems } from './hooks/usePantry'
 import { AddItem } from './pages/AddItem'
 import { Home } from './pages/Home'
@@ -15,6 +15,10 @@ import { maybeNotifyExpiringItems } from './utils/notifications'
 
 function App() {
   const items = usePantryItems()
+
+  useEffect(() => {
+    void ensureActiveProfile()
+  }, [])
 
   useEffect(() => {
     if (items.length === 0) return

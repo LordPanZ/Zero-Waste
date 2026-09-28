@@ -37,6 +37,7 @@ export function ItemDetail() {
     if (!item) return
     const daysHeld = Math.round((Date.now() - new Date(item.addedDate).getTime()) / (24 * 60 * 60 * 1000))
     await db.wasteLog.add({
+      profileId: item.profileId,
       itemName: item.name,
       category: item.category,
       quantity: item.quantity,
