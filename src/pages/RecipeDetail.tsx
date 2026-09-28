@@ -1,9 +1,13 @@
-import { ArrowLeft, Clock, Users } from 'lucide-react'
-import { useMemo } from 'react'
+import { useLiveQuery } from 'dexie-react-hooks'
+import { ArrowLeft, Calculator, Clock, Users } from 'lucide-react'
+import { useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
+import { db } from '../db'
 import { RECIPES } from '../data/recipes'
 import { useSortedPantryItems } from '../hooks/usePantry'
+import type { NutritionFacts, Recipe } from '../types'
 import { getItemStatus } from '../utils/dateUtils'
+import { findNutritionMatch, formatNutritionValue, NUTRITION_FIELDS, sumNutrition } from '../utils/nutrition'
 
 export function RecipeDetail() {
   const { id } = useParams()
@@ -82,6 +86,90 @@ export function RecipeDetail() {
           ))}
         </ol>
       </div>
+
+      <NutritionCalculator recipe={recipe} />
+    </div>
+  )
+}
+
+function NutritionCalculator({ recipe }: { recipe: Recipe }) {
+  const catalog = useLiveQuery(() => db.nutritionFacts.toArray(), []) ?? []
+  const ingredients = useMemo(
+    () => [...recipe.ingredients, ...(recipe.optionalIngredients ?? [])],
+    [recipe],
+  )
+  const [grams, setGrams] = useState<Record<string, number>>({})
+
+  const rows = useMemo(
+    () => ingredients.map((name) => ({ name, facts: findNutritionMatch(name, catalog) })),
+    [ingredients, catalog],
+  )
+  const matchedCount = rows.filter((r) => r.facts).length
+
+  const totals = useMemo(
+    () =>
+      sumNutrition(
+        rows
+          .filter((r): r is { name: string; facts: NutritionFacts } => !!r.facts)
+          .map((r) => ({ facts: r.facts, grams: grams[r.name] ?? 0 })),
+      ),
+    [rows, grams],
+  )
+  const hasTotals = Object.keys(totals).length > 0
+
+  if (matchedCount === 0) return null
+
+  return (
+    <div className="mx-4 rounded-2xl border border-stone-100 p-3">
+      <h2 className="mb-1 flex items-center gap-1.5 text-sm font-semibold text-stone-800">
+        <Calculator size={15} /> Calculadora nutricional
+      </h2>
+      <p className="mb-3 text-xs text-stone-500">
+        Indica cuántos gramos vas a usar de cada ingrediente con datos guardados y suma los valores de la receta.
+      </p>
+
+      <div className="flex flex-col gap-2">
+        {rows
+          .filter((r) => r.facts)
+          .map((r) => (
+            <div key={r.name} className="flex items-center gap-3">
+              <span className="flex-1 text-sm text-stone-700">{r.name}</span>
+              <input
+                type="number"
+                min={0}
+                step="any"
+                value={grams[r.name] ?? ''}
+                onChange={(e) => setGrams((prev) => ({ ...prev, [r.name]: Number(e.target.value) }))}
+                placeholder="g"
+                className="w-20 rounded-lg border border-stone-200 px-2 py-1.5 text-right text-sm outline-none focus:border-brand-500"
+              />
+              <span className="w-3 text-xs text-stone-400">g</span>
+            </div>
+          ))}
+      </div>
+
+      {matchedCount < rows.length && (
+        <p className="mt-2 text-xs text-stone-400">
+          {rows.length - matchedCount} ingrediente{rows.length - matchedCount === 1 ? '' : 's'} sin datos nutricionales
+          guardados — escanea su etiqueta al añadirlo a la despensa para incluirlo aquí.
+        </p>
+      )}
+
+      {hasTotals && (
+        <div className="mt-3 border-t border-stone-100 pt-3">
+          <p className="mb-1.5 text-xs font-semibold text-stone-500">Total del plato</p>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
+            {NUTRITION_FIELDS.filter((f) => totals[f.key] !== undefined).map((f) => (
+              <div key={f.key} className="flex items-center justify-between gap-2">
+                <span className="text-stone-500">{f.label}</span>
+                <span className="font-medium text-stone-800">
+                  {formatNutritionValue(totals[f.key]!)} {f.unit}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

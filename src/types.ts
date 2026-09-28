@@ -60,6 +60,24 @@ export interface AppSettings {
 
 export type ItemStatus = 'caducado' | 'urgente' | 'proximo' | 'ok' | 'sin-fecha'
 
+/** Nutritional values as printed on the label, per `perGrams` (almost always 100 g/ml). */
+export interface NutritionFacts {
+  id?: number
+  /** Normalized (trimmed, lowercase) food name, used to match pantry items and recipe ingredients. */
+  name: string
+  perGrams: number
+  energyKcal?: number
+  fat?: number
+  saturatedFat?: number
+  carbs?: number
+  sugars?: number
+  fiber?: number
+  protein?: number
+  salt?: number
+  fromOcr?: boolean
+  updatedAt: number
+}
+
 export interface Recipe {
   id: string
   name: string
