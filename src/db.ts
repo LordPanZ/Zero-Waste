@@ -137,6 +137,13 @@ export async function renameProfile(id: number, name: string): Promise<void> {
   await db.profiles.update(id, { name: name.trim() })
 }
 
+export async function updateProfile(id: number, patch: Partial<Pick<Profile, 'name' | 'emoji'>>): Promise<void> {
+  const clean: Partial<Pick<Profile, 'name' | 'emoji'>> = {}
+  if (patch.name !== undefined) clean.name = patch.name.trim()
+  if (patch.emoji !== undefined) clean.emoji = patch.emoji
+  await db.profiles.update(id, clean)
+}
+
 export async function switchProfile(id: number): Promise<void> {
   await updateSettings({ activeProfileId: id })
 }
