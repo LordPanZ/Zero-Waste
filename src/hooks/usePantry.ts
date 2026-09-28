@@ -1,10 +1,15 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../db'
-import type { PantryItem } from '../types'
+import type { PantryItem, WasteLogEntry } from '../types'
 import { getItemStatus, STATUS_ORDER } from '../utils/dateUtils'
+import { useActiveProfile } from './useProfiles'
 
 export function usePantryItems(): PantryItem[] {
-  const items = useLiveQuery(() => db.pantryItems.toArray(), [])
+  const profile = useActiveProfile()
+  const items = useLiveQuery(
+    () => (profile ? db.pantryItems.where('profileId').equals(profile.id!).toArray() : []),
+    [profile?.id],
+  )
   return items ?? []
 }
 
@@ -18,6 +23,12 @@ export function useSortedPantryItems(): PantryItem[] {
   })
 }
 
-export function useWasteLog() {
-  return useLiveQuery(() => db.wasteLog.orderBy('loggedAt').reverse().toArray(), []) ?? []
+export function useWasteLog(): WasteLogEntry[] {
+  const profile = useActiveProfile()
+  const entries = useLiveQuery(async () => {
+    if (!profile) return []
+    const rows = await db.wasteLog.where('profileId').equals(profile.id!).toArray()
+    return rows.sort((a, b) => b.loggedAt - a.loggedAt)
+  }, [profile?.id])
+  return entries ?? []
 }

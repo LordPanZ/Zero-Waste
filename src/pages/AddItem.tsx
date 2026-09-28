@@ -4,6 +4,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { PageHeader } from '../components/Layout'
 import { db, getNutritionByName, getSettings, upsertNutrition } from '../db'
 import { CATEGORY_LABELS, findCatalogEntry, searchCatalog, STORAGE_LABELS } from '../data/foodCatalog'
+import { useActiveProfile } from '../hooks/useProfiles'
 import type { FoodCategory, PantryItem, StorageLocation, TrackingMode } from '../types'
 import { formatDateHuman, todayISO } from '../utils/dateUtils'
 import { NUTRITION_FIELDS } from '../utils/nutrition'
@@ -18,6 +19,7 @@ export function AddItem() {
   const { id } = useParams()
   const [searchParams] = useSearchParams()
   const editingId = id ? Number(id) : undefined
+  const activeProfile = useActiveProfile()
 
   const [name, setName] = useState('')
   const [category, setCategory] = useState<FoodCategory>('verdura')
@@ -44,6 +46,8 @@ export function AddItem() {
   const [nutritionPhoto, setNutritionPhoto] = useState<string | undefined>()
   const nutritionFileInputRef = useRef<HTMLInputElement>(null)
 
+  const [originalProfileId, setOriginalProfileId] = useState<number | undefined>()
+
   useEffect(() => {
     getSettings().then((s) => setStorage(s.defaultStorage))
   }, [])
@@ -63,6 +67,7 @@ export function AddItem() {
       setAddedDate(item.addedDate)
       setNotes(item.notes ?? '')
       setFromOcr(!!item.fromOcr)
+      setOriginalProfileId(item.profileId)
       loadSavedNutrition(item.name)
     })
   }, [editingId])
@@ -154,8 +159,11 @@ export function AddItem() {
 
   async function handleSave() {
     if (!name.trim()) return
+    const profileId = editingId ? originalProfileId : activeProfile?.id
+    if (!profileId) return
     const now = Date.now()
     const payload: PantryItem = {
+      profileId,
       name: name.trim(),
       category,
       storage,
@@ -184,7 +192,10 @@ export function AddItem() {
     }
   }
 
-  const canSave = name.trim().length > 0 && (trackingMode === 'estimado' || expirationDate)
+  const canSave =
+    name.trim().length > 0 &&
+    (trackingMode === 'estimado' || expirationDate) &&
+    (editingId ? true : !!activeProfile)
 
   return (
     <div className="flex flex-col gap-5 pb-28">

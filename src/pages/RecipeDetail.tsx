@@ -5,8 +5,9 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { db } from '../db'
 import { RECIPES } from '../data/recipes'
 import { useSortedPantryItems } from '../hooks/usePantry'
-import type { NutritionFacts, Recipe } from '../types'
+import type { NutritionFacts, PantryItem, Recipe } from '../types'
 import { getItemStatus } from '../utils/dateUtils'
+import { findFoodMatch } from '../utils/matching'
 import { findNutritionMatch, formatNutritionValue, NUTRITION_FIELDS, sumNutrition } from '../utils/nutrition'
 
 export function RecipeDetail() {
@@ -16,11 +17,9 @@ export function RecipeDetail() {
   const items = useSortedPantryItems()
 
   const inPantry = useMemo(() => {
-    const map = new Map<string, boolean>()
+    const map = new Map<string, PantryItem | undefined>()
     for (const ingredient of recipe?.ingredients ?? []) {
-      const ing = ingredient.toLowerCase()
-      const match = items.find((i) => i.name.toLowerCase().includes(ing) || ing.includes(i.name.toLowerCase()))
-      map.set(ingredient, !!match && ['caducado', 'urgente', 'proximo'].includes(getItemStatus(match)))
+      map.set(ingredient, findFoodMatch(ingredient, items, (i) => i.name))
     }
     return map
   }, [recipe, items])
@@ -53,17 +52,19 @@ export function RecipeDetail() {
       <div className="px-4">
         <h2 className="mb-2 text-sm font-semibold text-stone-800">Ingredientes</h2>
         <ul className="flex flex-col gap-1.5">
-          {recipe.ingredients.map((ing) => (
-            <li key={ing} className="flex items-center gap-2 text-sm">
-              <span
-                className={`h-2 w-2 rounded-full ${
-                  inPantry.get(ing) ? 'bg-orange-500' : items.some((i) => i.name.toLowerCase().includes(ing.toLowerCase())) ? 'bg-emerald-500' : 'bg-stone-300'
-                }`}
-              />
-              {ing}
-              {inPantry.get(ing) && <span className="text-xs text-orange-600">(a punto de caducar)</span>}
-            </li>
-          ))}
+          {recipe.ingredients.map((ing) => {
+            const match = inPantry.get(ing)
+            const isUrgent = !!match && ['caducado', 'urgente', 'proximo'].includes(getItemStatus(match))
+            return (
+              <li key={ing} className="flex items-center gap-2 text-sm">
+                <span
+                  className={`h-2 w-2 rounded-full ${isUrgent ? 'bg-orange-500' : match ? 'bg-emerald-500' : 'bg-stone-300'}`}
+                />
+                {ing}
+                {isUrgent && <span className="text-xs text-orange-600">(a punto de caducar)</span>}
+              </li>
+            )
+          })}
           {recipe.optionalIngredients?.map((ing) => (
             <li key={ing} className="flex items-center gap-2 text-sm text-stone-400">
               <span className="h-2 w-2 rounded-full bg-stone-200" />

@@ -73,6 +73,13 @@ export const FOOD_CATALOG: FoodCatalogEntry[] = [
   { name: 'Arroz', category: 'despensa', icon: '🍚', defaultStorage: 'despensa', shelfLifeDays: { despensa: 730 } },
   { name: 'Pasta', category: 'despensa', icon: '🍝', defaultStorage: 'despensa', shelfLifeDays: { despensa: 730 } },
   { name: 'Legumbres secas', category: 'despensa', icon: '🫘', defaultStorage: 'despensa', shelfLifeDays: { despensa: 730 } },
+
+  // --- Conservas y salsas (productos elaborados: no confundir con la verdura/fruta fresca) ---
+  // Sin shelfLifeDays a propósito: son productos envasados con fecha de caducidad impresa,
+  // así que al elegirlos el modo de seguimiento se queda en "Tiene fecha impresa".
+  { name: 'Tomate frito', category: 'despensa', icon: '🥫', defaultStorage: 'despensa', shelfLifeDays: {} },
+  { name: 'Tomate triturado', category: 'despensa', icon: '🥫', defaultStorage: 'despensa', shelfLifeDays: {} },
+  { name: 'Salsa de tomate', category: 'despensa', icon: '🥫', defaultStorage: 'despensa', shelfLifeDays: {} },
 ]
 
 export function findCatalogEntry(name: string): FoodCatalogEntry | undefined {

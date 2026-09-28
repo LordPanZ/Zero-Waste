@@ -1,6 +1,7 @@
 import { BarChart3, ChefHat, Home, Settings, ShoppingBasket } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
+import { ProfileSwitcher } from './ProfileSwitcher'
 
 const NAV_ITEMS = [
   { to: '/', label: 'Inicio', icon: Home, end: true },
@@ -17,13 +18,16 @@ export function Layout() {
           <span className="text-xl">🌱</span>
           <span className="font-semibold text-stone-900">Zero Waste</span>
         </div>
-        <NavLink
-          to="/ajustes"
-          className="rounded-full p-2 text-stone-500 transition hover:bg-stone-100 hover:text-stone-800"
-          aria-label="Ajustes"
-        >
-          <Settings size={20} />
-        </NavLink>
+        <div className="flex items-center gap-1">
+          <ProfileSwitcher />
+          <NavLink
+            to="/ajustes"
+            className="rounded-full p-2 text-stone-500 transition hover:bg-stone-100 hover:text-stone-800"
+            aria-label="Ajustes"
+          >
+            <Settings size={20} />
+          </NavLink>
+        </div>
       </header>
 
       <main className="no-scrollbar flex-1 overflow-y-auto pb-24">

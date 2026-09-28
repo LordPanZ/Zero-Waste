@@ -1,4 +1,5 @@
 import type { Recipe } from '../types'
+import { foodNamesMatch } from '../utils/matching'
 
 /**
  * Small offline recipe book. Ingredient names are matched loosely (case-insensitive,
@@ -236,17 +237,15 @@ export function scoreRecipe(
   pantryNames: string[],
   urgentNames: Set<string>,
 ): { score: number; matched: string[]; missing: string[] } {
-  const normalizedPantry = pantryNames.map((n) => n.toLowerCase())
   const matched: string[] = []
   const missing: string[] = []
   let score = 0
 
   for (const ingredient of recipe.ingredients) {
-    const ing = ingredient.toLowerCase()
-    const isInPantry = normalizedPantry.some((p) => p.includes(ing) || ing.includes(p))
+    const isInPantry = pantryNames.some((p) => foodNamesMatch(p, ingredient))
     if (isInPantry) {
       matched.push(ingredient)
-      const isUrgent = [...urgentNames].some((u) => u.toLowerCase().includes(ing) || ing.includes(u.toLowerCase()))
+      const isUrgent = [...urgentNames].some((u) => foodNamesMatch(u, ingredient))
       score += isUrgent ? 10 : 3
     } else {
       missing.push(ingredient)
