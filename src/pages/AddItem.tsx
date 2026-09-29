@@ -1,4 +1,4 @@
-import { Camera, Check, ChevronDown, ClipboardList, Loader2, X } from 'lucide-react'
+import { Camera, Check, ChevronDown, ClipboardList, Loader2, Sparkles, X } from 'lucide-react'
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { PageHeader } from '../components/Layout'
@@ -6,6 +6,7 @@ import { db, getNutritionByName, getSettings, upsertNutrition } from '../db'
 import { CATEGORY_LABELS, findCatalogEntry, searchCatalog, STORAGE_LABELS } from '../data/foodCatalog'
 import { useActiveProfile } from '../hooks/useProfiles'
 import type { FoodCategory, PantryItem, StorageLocation, TrackingMode } from '../types'
+import { AiScanError, analyzePhoto, describeAiScanError, type PhotoAnalysis, type ScanHint } from '../utils/aiScan'
 import { formatDateHuman, todayISO } from '../utils/dateUtils'
 import { NUTRITION_FIELDS } from '../utils/nutrition'
 import { type DateCandidate, scanExpirationDate } from '../utils/ocr'
@@ -47,6 +48,20 @@ export function AddItem() {
   const nutritionFileInputRef = useRef<HTMLInputElement>(null)
 
   const [originalProfileId, setOriginalProfileId] = useState<number | undefined>()
+
+  const [aiStatus, setAiStatus] = useState<'idle' | 'scanning' | 'error'>('idle')
+  const [aiError, setAiError] = useState<string | null>(null)
+  const [aiResult, setAiResult] = useState<PhotoAnalysis | null>(null)
+  const [aiPhoto, setAiPhoto] = useState<string | undefined>()
+  const [nameFromAi, setNameFromAi] = useState(false)
+  const [ocrNote, setOcrNote] = useState<string | null>(null)
+  const [ocrErrorText, setOcrErrorText] = useState<string | null>(null)
+  const [nutritionNote, setNutritionNote] = useState<string | null>(null)
+  const [nutritionErrorText, setNutritionErrorText] = useState<string | null>(null)
+  const aiFileInputRef = useRef<HTMLInputElement>(null)
+  // Photo analysis finishes seconds after it starts; read the latest form values, not the ones from when it began.
+  const latest = useRef({ name, nameFromAi, storage })
+  latest.current = { name, nameFromAi, storage }
 
   useEffect(() => {
     getSettings().then((s) => setStorage(s.defaultStorage))
@@ -98,6 +113,7 @@ export function AddItem() {
   function applyCatalogEntry(entryName: string) {
     const entry = findCatalogEntry(entryName)
     setName(entryName)
+    setNameFromAi(false)
     setShowSuggestions(false)
     void loadSavedNutrition(entryName)
     if (!entry) return
@@ -117,11 +133,88 @@ export function AddItem() {
     if (days) setShelfLifeDays(days)
   }
 
+  function applyAnalysis(a: PhotoAnalysis, scope: ScanHint) {
+    const current = latest.current
+    const aiControlsIdentity = scope === 'todo' && !!a.foodName && (!current.name.trim() || current.nameFromAi)
+    if (aiControlsIdentity && a.foodName) {
+      setName(a.foodName)
+      setNameFromAi(true)
+      if (a.category) setCategory(a.category)
+      if (a.storage) setStorage(a.storage)
+      void loadSavedNutrition(a.foodName)
+    }
+
+    let foundDate = false
+    let estimatedDays: number | null = null
+    if (scope !== 'nutricion') {
+      if (a.expirationDate) {
+        foundDate = true
+        setExpirationDate(a.expirationDate)
+        setTrackingMode('fecha')
+        setFromOcr(true)
+        setOcrCandidates([
+          { iso: a.expirationDate, raw: a.dateLabel ?? a.expirationDate, confidence: a.confidence === 'alta' ? 'alta' : 'media' },
+        ])
+      } else if (aiControlsIdentity && a.foodName) {
+        const entry = findCatalogEntry(a.foodName)
+        const where = a.storage ?? entry?.defaultStorage ?? current.storage
+        const days = entry?.shelfLifeDays[where] ?? a.shelfLifeDays
+        if (days) {
+          estimatedDays = days
+          setShelfLifeDays(days)
+          setTrackingMode('estimado')
+        }
+      }
+    }
+
+    let foundNutrition = false
+    if (scope !== 'fecha' && a.nutrition) {
+      const values = Object.fromEntries(Object.entries(a.nutrition).filter(([, v]) => v != null)) as ScannedNutrition
+      if (Object.keys(values).length > 0) {
+        foundNutrition = true
+        setNutrition((prev) => ({ ...prev, ...values }))
+        setNutritionFromOcr(true)
+        setNutritionExpanded(true)
+      }
+    }
+
+    return { foundDate, foundNutrition, estimatedDays }
+  }
+
+  async function handleAiScan(file: File) {
+    setAiPhoto(URL.createObjectURL(file))
+    setAiStatus('scanning')
+    setAiError(null)
+    setAiResult(null)
+    try {
+      const analysis = await analyzePhoto(file, 'todo')
+      const { estimatedDays } = applyAnalysis(analysis, 'todo')
+      setAiResult({ ...analysis, shelfLifeDays: estimatedDays ?? analysis.shelfLifeDays })
+      setAiStatus('idle')
+    } catch (e) {
+      setAiError(describeAiScanError(e instanceof AiScanError ? e.code : 'unavailable'))
+      setAiStatus('error')
+    }
+  }
+
   async function handlePhotoSelected(file: File) {
     setPhotoPreview(URL.createObjectURL(file))
     setOcrStatus('scanning')
     setOcrCandidates([])
+    setOcrNote(null)
+    setOcrErrorText(null)
     try {
+      try {
+        const analysis = await analyzePhoto(file, 'fecha')
+        const { foundDate } = applyAnalysis(analysis, 'fecha')
+        setOcrNote(analysis.message)
+        setOcrStatus(foundDate ? 'idle' : 'no-match')
+        return
+      } catch (e) {
+        if (!(e instanceof AiScanError) || !e.canFallBackToLocalOcr) throw e
+      }
+
+      // AI service unreachable or not set up: fall back to the on-device OCR.
       const result = await scanExpirationDate(file)
       setOcrCandidates(result.candidates)
       if (result.candidates.length > 0) {
@@ -132,7 +225,8 @@ export function AddItem() {
       } else {
         setOcrStatus('no-match')
       }
-    } catch {
+    } catch (e) {
+      setOcrErrorText(e instanceof AiScanError ? describeAiScanError(e.code) : null)
       setOcrStatus('error')
     }
   }
@@ -140,7 +234,19 @@ export function AddItem() {
   async function handlePhotoSelectedNutrition(file: File) {
     setNutritionPhoto(URL.createObjectURL(file))
     setNutritionOcrStatus('scanning')
+    setNutritionNote(null)
+    setNutritionErrorText(null)
     try {
+      try {
+        const analysis = await analyzePhoto(file, 'nutricion')
+        const { foundNutrition } = applyAnalysis(analysis, 'nutricion')
+        setNutritionNote(analysis.message)
+        setNutritionOcrStatus(foundNutrition ? 'idle' : 'no-match')
+        return
+      } catch (e) {
+        if (!(e instanceof AiScanError) || !e.canFallBackToLocalOcr) throw e
+      }
+
       const result = await scanNutritionLabel(file)
       const found = Object.values(result.values).some((v) => v !== undefined)
       if (found) {
@@ -150,7 +256,8 @@ export function AddItem() {
       } else {
         setNutritionOcrStatus('no-match')
       }
-    } catch {
+    } catch (e) {
+      setNutritionErrorText(e instanceof AiScanError ? describeAiScanError(e.code) : null)
       setNutritionOcrStatus('error')
     }
   }
@@ -202,12 +309,48 @@ export function AddItem() {
       <PageHeader title={editingId ? 'Editar alimento' : 'Añadir alimento'} />
 
       <div className="flex flex-col gap-4 px-4">
+        {!editingId && (
+          <div className="rounded-2xl border border-brand-200 bg-brand-50/60 p-3">
+            <button
+              onClick={() => aiFileInputRef.current?.click()}
+              disabled={aiStatus === 'scanning'}
+              className="flex w-full items-center gap-3 text-left"
+            >
+              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-brand-600 text-white">
+                {aiStatus === 'scanning' ? <Loader2 size={22} className="animate-spin" /> : <Camera size={22} />}
+              </span>
+              <span>
+                <span className="block text-sm font-semibold text-stone-900">
+                  {aiStatus === 'scanning' ? 'Analizando la foto…' : 'Escanear con la cámara'}
+                </span>
+                <span className="block text-xs text-stone-500">
+                  Haz una foto al alimento, al envase o a la fecha y la app reconoce qué es y rellena el resto.
+                </span>
+              </span>
+            </button>
+            <input
+              ref={aiFileInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0]
+                if (file) void handleAiScan(file)
+                e.target.value = ''
+              }}
+            />
+            {aiStatus === 'error' && aiError && <p className="mt-2 text-xs text-red-600">{aiError}</p>}
+            {aiResult && <AiResultCard result={aiResult} photo={aiPhoto} />}
+          </div>
+        )}
+
         <div>
           <span className="mb-1 block text-sm font-medium text-stone-700">Nombre</span>
           <input
             value={name}
             onChange={(e) => {
               setName(e.target.value)
+              setNameFromAi(false)
               setShowSuggestions(true)
             }}
             onFocus={() => setShowSuggestions(true)}
@@ -357,13 +500,15 @@ export function AddItem() {
             )}
 
             {ocrStatus === 'error' && (
-              <p className="text-xs text-red-600">No se pudo leer la imagen. Prueba con otra foto o introduce la fecha a mano.</p>
+              <p className="text-xs text-red-600">
+                {ocrErrorText ?? 'No se pudo leer la imagen. Prueba con otra foto o introduce la fecha a mano.'}
+              </p>
             )}
 
             {ocrStatus === 'no-match' && (
               <p className="text-xs text-amber-700">
-                No hemos podido detectar ninguna fecha en la foto. Prueba con otra foto bien enfocada e iluminada, o
-                escribe la fecha directamente arriba.
+                {ocrNote ??
+                  'No hemos podido detectar ninguna fecha en la foto. Prueba con otra foto bien enfocada e iluminada, o escribe la fecha directamente arriba.'}
               </p>
             )}
 
@@ -468,13 +613,15 @@ export function AddItem() {
               )}
 
               {nutritionOcrStatus === 'error' && (
-                <p className="text-xs text-red-600">No se pudo leer la imagen. Prueba con otra foto o introduce los valores a mano.</p>
+                <p className="text-xs text-red-600">
+                  {nutritionErrorText ?? 'No se pudo leer la imagen. Prueba con otra foto o introduce los valores a mano.'}
+                </p>
               )}
 
               {nutritionOcrStatus === 'no-match' && (
                 <p className="text-xs text-amber-700">
-                  No hemos podido leer ningún valor en la foto. Prueba con otra foto bien enfocada de la tabla
-                  nutricional, o escribe los valores directamente abajo.
+                  {nutritionNote ??
+                    'No hemos podido leer ningún valor en la foto. Prueba con otra foto bien enfocada de la tabla nutricional, o escribe los valores directamente abajo.'}
                 </p>
               )}
 
@@ -511,6 +658,38 @@ export function AddItem() {
         >
           {editingId ? 'Guardar cambios' : 'Añadir a la despensa'}
         </button>
+      </div>
+    </div>
+  )
+}
+
+function AiResultCard({ result, photo }: { result: PhotoAnalysis; photo?: string }) {
+  const chips = [
+    result.category && CATEGORY_LABELS[result.category],
+    result.storage && STORAGE_LABELS[result.storage],
+  ].filter(Boolean)
+
+  return (
+    <div className="mt-3 flex gap-3 rounded-xl bg-white p-3">
+      {photo && <img src={photo} alt="Foto analizada" className="h-14 w-14 shrink-0 rounded-lg object-cover" />}
+      <div className="min-w-0 flex-1 text-sm">
+        <p className="flex items-center gap-1.5 font-semibold text-stone-900">
+          <Sparkles size={14} className="shrink-0 text-brand-600" />
+          {result.foodName ?? 'No he podido identificar el alimento'}
+        </p>
+        {chips.length > 0 && <p className="text-xs text-stone-500">{chips.join(' · ')}</p>}
+        <p className="mt-1 text-xs text-stone-700">
+          {result.expirationDate
+            ? `Caducidad: ${formatDateHuman(result.expirationDate)}${result.dateLabel ? ` (“${result.dateLabel}”)` : ''}`
+            : result.shelfLifeDays
+              ? `Sin fecha impresa: estimamos unos ${result.shelfLifeDays} días.`
+              : 'No se ve ninguna fecha en esta foto.'}
+        </p>
+        {result.nutrition && <p className="text-xs text-stone-700">Tabla nutricional leída ✓</p>}
+        {result.message && <p className="mt-1 text-xs text-amber-700">{result.message}</p>}
+        <p className="mt-1 text-xs text-stone-400">
+          {result.confidence === 'baja' ? 'Lectura poco segura: revisa' : 'Revisa'} los datos antes de guardar.
+        </p>
       </div>
     </div>
   )
