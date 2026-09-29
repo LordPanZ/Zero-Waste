@@ -18,7 +18,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
+      - run: npm ci || npm install --no-audit --no-fund
       - run: npm run build
 
       # The photo-analysis function reads the key at runtime from the site's environment.
