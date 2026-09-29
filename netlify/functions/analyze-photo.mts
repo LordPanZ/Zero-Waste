@@ -1,5 +1,3 @@
-import Anthropic from '@anthropic-ai/sdk'
-import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod'
 import type { Context } from '@netlify/functions'
 import {
   type AnalyzePhotoErrorCode,
@@ -10,13 +8,44 @@ import {
   sanitizeAnalysis,
 } from '../../src/shared/photoAnalysis.ts'
 
-// Sonnet 5.5 reads printed labels well and answers in a few seconds, which matters because
-// synchronous Netlify functions have a short execution limit. Override with ANTHROPIC_MODEL.
-const DEFAULT_MODEL = 'claude-sonnet-5-5'
+// Gemini Flash reads printed labels well and has a free tier. Override with GEMINI_MODEL if Google renames it.
+const DEFAULT_MODEL = 'gemini-2.5-flash'
 
 const MAX_IMAGE_CHARS = 5_500_000
 const MEDIA_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif'])
 const HINTS = new Set(['todo', 'fecha', 'nutricion'])
+
+const nullable = (type: string, extra: Record<string, unknown> = {}) => ({ type, nullable: true, ...extra })
+
+const RESPONSE_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    foodName: nullable('STRING'),
+    category: nullable('STRING', {
+      format: 'enum',
+      enum: ['fruta', 'verdura', 'lacteo', 'carne', 'pescado', 'panaderia', 'despensa', 'congelado', 'bebida', 'otro'],
+    }),
+    storage: nullable('STRING', { format: 'enum', enum: ['nevera', 'despensa', 'congelador'] }),
+    expirationDate: nullable('STRING'),
+    dateLabel: nullable('STRING'),
+    dateKind: nullable('STRING', { format: 'enum', enum: ['caducidad', 'consumo_preferente'] }),
+    shelfLifeDays: nullable('NUMBER'),
+    nutrition: {
+      type: 'OBJECT',
+      nullable: true,
+      properties: Object.fromEntries(
+        ['energyKcal', 'fat', 'saturatedFat', 'carbs', 'sugars', 'fiber', 'protein', 'salt'].map((k) => [k, nullable('NUMBER')]),
+      ),
+      required: ['energyKcal', 'fat', 'saturatedFat', 'carbs', 'sugars', 'fiber', 'protein', 'salt'],
+    },
+    confidence: { type: 'STRING', format: 'enum', enum: ['alta', 'media', 'baja'] },
+    message: nullable('STRING'),
+  },
+  required: [
+    'foodName', 'category', 'storage', 'expirationDate', 'dateLabel', 'dateKind',
+    'shelfLifeDays', 'nutrition', 'confidence', 'message',
+  ],
+}
 
 const SYSTEM_PROMPT = `Eres el asistente de visión de una app de despensa para no desperdiciar comida. Recibes UNA foto hecha con el móvil y devuelves únicamente lo que se ve con claridad. Nunca inventes datos: si algo no se ve o no estás seguro, devuelve null.
 
@@ -71,7 +100,7 @@ export default async (req: Request, _context: Context): Promise<Response> => {
   const origin = req.headers.get('origin')
   if (origin && new URL(origin).host !== new URL(req.url).host) return fail('forbidden', 403)
 
-  const apiKey = Netlify.env.get('ANTHROPIC_API_KEY')
+  const apiKey = Netlify.env.get('GEMINI_API_KEY')
   if (!apiKey) return fail('not_configured', 503)
 
   let body: AnalyzePhotoRequest | null
@@ -82,43 +111,72 @@ export default async (req: Request, _context: Context): Promise<Response> => {
   }
   if (!body) return fail('bad_request', 400)
 
-  const client = new Anthropic({ apiKey, maxRetries: 1, timeout: 25_000 })
+  const model = Netlify.env.get('GEMINI_MODEL') || DEFAULT_MODEL
+
+  let upstream: Response
+  try {
+    upstream = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey },
+      signal: AbortSignal.timeout(25_000),
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              { inlineData: { mimeType: body.mediaType, data: body.image } },
+              { text: `Hoy es ${body.today}. ${HINT_TEXT[body.hint]}` },
+            ],
+          },
+        ],
+        generationConfig: {
+          temperature: 0,
+          maxOutputTokens: 2000,
+          responseMimeType: 'application/json',
+          responseSchema: RESPONSE_SCHEMA,
+          // Extraction doesn't need reasoning; skipping it keeps answers fast and within the free quota.
+          ...(/2\.5-flash/.test(model) ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
+        },
+      }),
+    })
+  } catch (error) {
+    console.error('analyze-photo: request failed', error instanceof Error ? error.message : error)
+    return fail('unavailable', 502)
+  }
+
+  if (!upstream.ok) {
+    const detail = await upstream.text().catch(() => '')
+    console.error('analyze-photo: Gemini error', upstream.status, detail.slice(0, 500))
+    if (upstream.status === 429) return fail('rate_limited', 429)
+    if (upstream.status === 403 || (upstream.status === 400 && /API_KEY|API key/i.test(detail))) return fail('bad_key', 500)
+    return fail('unavailable', 502)
+  }
 
   try {
-    const response = await client.messages.parse({
-      model: Netlify.env.get('ANTHROPIC_MODEL') || DEFAULT_MODEL,
-      max_tokens: 2000,
-      system: SYSTEM_PROMPT,
-      output_config: { effort: 'low', format: zodOutputFormat(photoAnalysisSchema) },
-      messages: [
-        {
-          role: 'user',
-          content: [
-            { type: 'image', source: { type: 'base64', media_type: body.mediaType, data: body.image } },
-            { type: 'text', text: `Hoy es ${body.today}. ${HINT_TEXT[body.hint]}` },
-          ],
-        },
-      ],
-    })
+    const data = (await upstream.json()) as {
+      promptFeedback?: { blockReason?: string }
+      candidates?: { finishReason?: string; content?: { parts?: { text?: string }[] } }[]
+    }
+    const candidate = data.candidates?.[0]
+    if (data.promptFeedback?.blockReason || candidate?.finishReason === 'SAFETY') return fail('refused', 422)
 
-    if (response.stop_reason === 'refusal') return fail('refused', 422)
-    if (!response.parsed_output) {
-      console.error('analyze-photo: unparsable model output, stop_reason =', response.stop_reason)
+    const text = candidate?.content?.parts?.map((p) => p.text ?? '').join('') ?? ''
+    // Gemini sometimes omits empty fields instead of returning null.
+    const raw = JSON.parse(text) as Record<string, unknown>
+    for (const key of Object.keys(photoAnalysisSchema.shape)) raw[key] ??= null
+    if (raw.nutrition && typeof raw.nutrition === 'object') {
+      const nutrition = raw.nutrition as Record<string, unknown>
+      for (const key of Object.keys(photoAnalysisSchema.shape.nutrition.unwrap().shape)) nutrition[key] ??= null
+    }
+    const parsed = photoAnalysisSchema.safeParse(raw)
+    if (!parsed.success) {
+      console.error('analyze-photo: unexpected shape', parsed.error.message.slice(0, 500))
       return fail('unavailable', 502)
     }
-
-    return json({ ok: true, analysis: sanitizeAnalysis(response.parsed_output, body.today) }, 200)
+    return json({ ok: true, analysis: sanitizeAnalysis(parsed.data, body.today) }, 200)
   } catch (error) {
-    if (error instanceof Anthropic.AuthenticationError || error instanceof Anthropic.PermissionDeniedError) {
-      console.error('analyze-photo: API key rejected', error.status)
-      return fail('bad_key', 500)
-    }
-    if (error instanceof Anthropic.RateLimitError) return fail('rate_limited', 429)
-    if (error instanceof Anthropic.BadRequestError) {
-      console.error('analyze-photo: bad request', error.message)
-      return fail(/credit balance/i.test(error.message) ? 'no_credit' : 'unavailable', /credit balance/i.test(error.message) ? 402 : 502)
-    }
-    console.error('analyze-photo: unexpected error', error instanceof Error ? error.message : error)
+    console.error('analyze-photo: unparsable response', error instanceof Error ? error.message : error)
     return fail('unavailable', 502)
   }
 }

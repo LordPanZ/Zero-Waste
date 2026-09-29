@@ -5,7 +5,7 @@ export type { PhotoAnalysis, ScanHint }
 
 const ENDPOINT = '/.netlify/functions/analyze-photo'
 
-// Claude downsizes anything larger than this on its side anyway, so sending more only slows the upload.
+// The model downsizes anything larger than this on its side anyway, so sending more only slows the upload.
 const MAX_IMAGE_SIDE = 1568
 
 export type AiScanErrorCode = AnalyzePhotoErrorCode | 'offline' | 'bad_image'
@@ -28,7 +28,7 @@ const ERROR_MESSAGES: Record<AiScanErrorCode, string> = {
   not_configured: 'El escaneo con IA todavía no está activado en esta app.',
   no_credit: 'La cuenta de IA se ha quedado sin saldo. Avisa a quien administra la app.',
   bad_key: 'La clave de la IA no es válida. Avisa a quien administra la app.',
-  rate_limited: 'Hay demasiadas peticiones ahora mismo. Espera un minuto y vuelve a intentarlo.',
+  rate_limited: 'Se ha alcanzado el límite gratuito de la IA (por minuto o por día). Espera un poco y vuelve a intentarlo.',
   refused: 'La IA no ha podido analizar esta foto. Prueba con otra.',
   bad_request: 'La foto no se ha podido enviar. Prueba con otra.',
   forbidden: 'Esta petición no está permitida desde aquí.',

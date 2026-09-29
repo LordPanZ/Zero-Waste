@@ -11,7 +11,7 @@ jobs:
     env:
       NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
       NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -23,10 +23,10 @@ jobs:
 
       # The photo-analysis function reads the key at runtime from the site's environment.
       # It must be set before the deploy so the new function version picks it up.
-      - name: Sync Anthropic API key to Netlify
-        if: env.ANTHROPIC_API_KEY != ''
+      - name: Sync Gemini API key to Netlify
+        if: env.GEMINI_API_KEY != ''
         continue-on-error: true
-        run: npx netlify-cli@17 env:set ANTHROPIC_API_KEY "$ANTHROPIC_API_KEY"
+        run: npx netlify-cli@17 env:set GEMINI_API_KEY "$GEMINI_API_KEY"
 
       - name: Deploy to Netlify
         run: npx netlify-cli@17 deploy --prod --dir=dist --functions=netlify/functions
